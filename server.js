@@ -48,13 +48,13 @@ app.get('/diagnose', (req, res) => {
 });
 
 // ============================================
-// 🎯 CREAR SESIÓN DE PAGO (VERSIÓN FUSIONADA)
+// 🎯 CREAR SESIÓN DE PAGO (UN SOLO ITEM)
 // ============================================
 app.post('/create-checkout-session', async (req, res) => {
   console.log('📩 Nueva petición:', req.body);
   
   try {
-    // ✅ Validar API key
+    // Validar API key
     const apiKey = process.env.STRIPE_SECRET_KEY;
     if (!apiKey) {
       return res.status(500).json({ error: 'STRIPE_SECRET_KEY no configurada' });
@@ -74,55 +74,42 @@ app.post('/create-checkout-session', async (req, res) => {
     const tipAmount = tip || 0;
     const totalAmount = amount + tipAmount;
     
-    // ✅ Statement descriptor (aparece en estado de cuenta)
+    // Statement descriptor (aparece en estado de cuenta)
     const statementDescriptor = tituloCampana
       .replace(/[^\w\s]/g, '')
       .trim()
       .substring(0, 22)
       .toUpperCase();
 
-    // ✅ CONSTRUIR ITEMS
+    // ✅ UN SOLO ITEM con el total (donación + aporte voluntario)
     const lineItems = [
       {
         price_data: {
           currency: 'usd',
           product_data: {
             name: tituloCampana,
-            description: `Tu donación de $${amount.toFixed(2)} ayudará a cumplir el sueño de Cecilia y sus hijos. ¡Gracias por tu generosidad!`,
+            description: tipAmount > 0 
+              ? `Donación de $${amount.toFixed(2)} + Aporte voluntario de $${tipAmount.toFixed(2)} = Total $${totalAmount.toFixed(2)}`
+              : `Donación de $${amount.toFixed(2)}`,
             images: ['https://i.ibb.co/4Rrb1ZPR/IMG-5534115-2-1.jpg'],
           },
-          unit_amount: Math.round(amount * 100),
+          unit_amount: Math.round(totalAmount * 100), // ✅ Total completo
         },
         quantity: 1,
       }
     ];
 
-    // ✅ Agregar aporte voluntario si existe
-    if (tipAmount > 0) {
-      lineItems.push({
-        price_data: {
-          currency: 'usd',
-          product_data: {
-            name: 'Aporte voluntario a GoFundMe',
-            description: `Gracias por apoyar la plataforma con $${tipAmount.toFixed(2)}`,
-          },
-          unit_amount: Math.round(tipAmount * 100),
-        },
-        quantity: 1,
-      });
-    }
-
-    console.log('🛒 Items creados:', lineItems.map(item => ({
-      name: item.price_data.product_data.name,
-      amount: item.price_data.unit_amount / 100
-    })));
+    console.log('🛒 Item creado:', {
+      name: lineItems[0].price_data.product_data.name,
+      description: lineItems[0].price_data.product_data.description,
+      total: lineItems[0].price_data.unit_amount / 100
+    });
 
     const session = await stripe.checkout.sessions.create({
       payment_method_types: ['card'],
       line_items: lineItems,
       mode: 'payment',
       
-      // ✅ Statement descriptor personalizado
       payment_intent_data: {
         statement_descriptor: statementDescriptor,
         description: `${tituloCampana} - Total: $${totalAmount.toFixed(2)} USD`,
@@ -134,7 +121,7 @@ app.post('/create-checkout-session', async (req, res) => {
         }
       },
       
-      success_url: `https://gohelpyou.com/gracias`,
+      success_url: `https://gohelpyou.com/graciasportudonativo?session_id={CHECKOUT_SESSION_ID}&amount=${amount}`,
       cancel_url: `https://gohelpyou.com/?canceled=true`,
       
       metadata: {
