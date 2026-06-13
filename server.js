@@ -6,9 +6,6 @@ const cors = require('cors');
 const app = express();
 const PORT = process.env.PORT || 3000;
 
-// ============================================
-// 🌐 CORS CONFIGURACIÓN
-// ============================================
 app.use(cors({
   origin: '*',
   credentials: true
@@ -17,9 +14,6 @@ app.use(cors({
 app.post('/webhook', express.raw({ type: 'application/json' }));
 app.use(express.json());
 
-// ============================================
-// 🏠 RUTA DE PRUEBA
-// ============================================
 app.get('/', (req, res) => {
   res.json({ 
     status: 'ok',
@@ -29,9 +23,6 @@ app.get('/', (req, res) => {
   });
 });
 
-// ============================================
-// 🧪 ENDPOINT DE DIAGNÓSTICO
-// ============================================
 app.get('/diagnose', (req, res) => {
   const apiKey = process.env.STRIPE_SECRET_KEY;
   
@@ -48,13 +39,12 @@ app.get('/diagnose', (req, res) => {
 });
 
 // ============================================
-// 🎯 CREAR SESIÓN DE PAGO (UN SOLO ITEM)
+// 🎯 CREAR SESIÓN DE PAGO (URL CORREGIDA)
 // ============================================
 app.post('/create-checkout-session', async (req, res) => {
   console.log('📩 Nueva petición:', req.body);
   
   try {
-    // Validar API key
     const apiKey = process.env.STRIPE_SECRET_KEY;
     if (!apiKey) {
       return res.status(500).json({ error: 'STRIPE_SECRET_KEY no configurada' });
@@ -74,14 +64,12 @@ app.post('/create-checkout-session', async (req, res) => {
     const tipAmount = tip || 0;
     const totalAmount = amount + tipAmount;
     
-    // Statement descriptor (aparece en estado de cuenta)
     const statementDescriptor = tituloCampana
       .replace(/[^\w\s]/g, '')
       .trim()
       .substring(0, 22)
       .toUpperCase();
 
-    // ✅ UN SOLO ITEM con el total (donación + aporte voluntario)
     const lineItems = [
       {
         price_data: {
@@ -93,7 +81,7 @@ app.post('/create-checkout-session', async (req, res) => {
               : `Donación de $${amount.toFixed(2)}`,
             images: ['https://i.ibb.co/4Rrb1ZPR/IMG-5534115-2-1.jpg'],
           },
-          unit_amount: Math.round(totalAmount * 100), // ✅ Total completo
+          unit_amount: Math.round(totalAmount * 100),
         },
         quantity: 1,
       }
@@ -101,7 +89,6 @@ app.post('/create-checkout-session', async (req, res) => {
 
     console.log('🛒 Item creado:', {
       name: lineItems[0].price_data.product_data.name,
-      description: lineItems[0].price_data.product_data.description,
       total: lineItems[0].price_data.unit_amount / 100
     });
 
@@ -121,7 +108,8 @@ app.post('/create-checkout-session', async (req, res) => {
         }
       },
       
-      success_url: `https://gohelpyou.com/graciasportudonativo?session_id={CHECKOUT_SESSION_ID}&amount=${amount}`,
+      // ✅ URL CORREGIDA
+      success_url: `https://gohelpyou.com/gracias`,
       cancel_url: `https://gohelpyou.com/?canceled=true`,
       
       metadata: {
@@ -161,9 +149,6 @@ app.post('/create-checkout-session', async (req, res) => {
   }
 });
 
-// ============================================
-// 🔍 VERIFICAR PAGO
-// ============================================
 app.get('/verify-payment', async (req, res) => {
   const { session_id } = req.query;
   if (!session_id) return res.status(400).json({ error: 'Session ID requerido' });
@@ -183,9 +168,6 @@ app.get('/verify-payment', async (req, res) => {
   }
 });
 
-// ============================================
-// 🔔 WEBHOOK
-// ============================================
 app.post('/webhook', async (req, res) => {
   const sig = req.headers['stripe-signature'];
   const endpointSecret = process.env.STRIPE_WEBHOOK_SECRET;
@@ -203,7 +185,6 @@ app.post('/webhook', async (req, res) => {
     console.log('✅ PAGO EXITOSO:', {
       sessionId: session.id,
       amount: session.amount_total / 100,
-      currency: session.currency,
       metadata: session.metadata
     });
   }
@@ -211,9 +192,6 @@ app.post('/webhook', async (req, res) => {
   res.json({ received: true });
 });
 
-// ============================================
-// 🚀 INICIAR SERVIDOR
-// ============================================
 app.listen(PORT, () => {
   console.log(`
   ╔══════════════════════════════════════════╗
