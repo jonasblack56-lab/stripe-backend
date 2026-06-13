@@ -48,7 +48,7 @@ app.get('/diagnose', (req, res) => {
 });
 
 // ============================================
-// 🎯 CREAR SESIÓN DE PAGO (CORREGIDO)
+// 🎯 CREAR SESIÓN DE PAGO (CORREGIDO - SIN custom_text)
 // ============================================
 app.post('/create-checkout-session', async (req, res) => {
   console.log('📩 Nueva petición:', req.body);
@@ -85,12 +85,12 @@ app.post('/create-checkout-session', async (req, res) => {
     const totalAmount = amount + tipAmount;
     
     // ✅ CREAR STATEMENT DESCRIPTOR PERSONALIZADO
-    // Esto reemplaza "LOZADANETWORK LLC" en el checkout de Stripe
-    // Máximo 22 caracteres, solo letras, números, espacios y algunos símbolos
+    // Reemplaza "LOZADANETWORK LLC" en el checkout de Stripe
+    // Máximo 22 caracteres, solo letras, números y espacios
     const statementDescriptor = tituloCampana
       .replace(/[^\w\s]/g, '')  // Eliminar caracteres especiales
       .trim()
-      .substring(0, 18);  // Máximo 18 caracteres para dejar espacio al sufijo
+      .substring(0, 18);  // Máximo 18 caracteres
     
     // ✅ DESCRIPCIÓN DETALLADA
     const descripcionCampana = `Tu donación de $${amount.toFixed(2)} ayudará a cumplir el sueño de Cecilia y sus hijos. ¡Gracias por tu generosidad!`;
@@ -134,7 +134,7 @@ app.post('/create-checkout-session', async (req, res) => {
       total: totalAmount
     });
 
-    // ✅ CREAR SESIÓN DE STRIPE CON STATEMENT DESCRIPTOR PERSONALIZADO
+    // ✅ CREAR SESIÓN DE STRIPE (SIN custom_text)
     const session = await stripe.checkout.sessions.create({
       payment_method_types: ['card'],
       line_items: lineItems,
@@ -145,7 +145,7 @@ app.post('/create-checkout-session', async (req, res) => {
         // Statement descriptor (aparece en el estado de cuenta de la tarjeta)
         statement_descriptor: statementDescriptor.toUpperCase(),
         
-        // Sufijo adicional (aparece después del nombre del negocio)
+        // Sufijo adicional
         statement_descriptor_suffix: 'DONACION',
         
         // Descripción completa del pago
@@ -176,13 +176,7 @@ app.post('/create-checkout-session', async (req, res) => {
       locale: 'es-419',
       billing_address_collection: 'auto',
       
-      // ✅ Personalizar la página de checkout
-      custom_text: {
-        // Mensaje personalizado arriba del formulario de pago
-        submit_button: 'Pagar Donación',
-      },
-      
-      // Mostrar el total de forma prominente
+      // Opciones de método de pago
       payment_method_options: {
         card: {
           request_three_d_secure: 'automatic',
