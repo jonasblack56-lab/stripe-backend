@@ -134,7 +134,7 @@ app.post('/create-checkout-session', async (req, res) => {
         }
       },
       
-      success_url: `https://gohelpyou.com/graciasportudonativo?session_id={CHECKOUT_SESSION_ID}&amount=${amount}`,
+      success_url: `https://gohelpyou.com/gracias`,
       cancel_url: `https://gohelpyou.com/?canceled=true`,
       
       metadata: {
