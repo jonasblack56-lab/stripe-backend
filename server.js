@@ -1,64 +1,63 @@
-const express = require('express');
-const stripe = require('stripe')(process.env.STRIPE_SECRET_KEY);
-const cors = require('cors');
-require('dotenv').config();
-
-const app = express();
-
-app.use(cors({
-    origin: '*',
-}));
-
-app.use(express.json());
-
 app.post('/create-checkout-session', async (req, res) => {
-    try {
-        const { amount, tip, total, campaignName } = req.body;
+  try {
+    const { amount, tip, total, campaignName } = req.body;
 
-        if (!amount || amount < 5) {
-            return res.status(400).json({ error: 'Monto inválido' });
-        }
-
-        const amountInCents = Math.round(total * 100);
-
-        const session = await stripe.checkout.sessions.create({
-            payment_method_types: ['card'],
-            line_items: [
-                {
-                    price_data: {
-                        currency: 'usd',
-                        product_data: {
-                            name: campaignName || 'Donación',
-                            description: `Donación $${amount} + Aporte $${tip}`,
-                        },
-                        unit_amount: amountInCents,
-                    },
-                    quantity: 1,
-                },
-            ],
-            mode: 'payment',
-            success_url: 'https://www.lozadanetwork.com/success',
-            cancel_url: 'https://www.lozadanetwork.com/cancel',
-            metadata: {
-                donation_amount: amount.toString(),
-                tip_amount: tip.toString(),
-                total_amount: total.toString(),
-            },
-        });
-
-        res.json({ url: session.url, sessionId: session.id });
-
-    } catch (error) {
-        console.error('Error:', error);
-        res.status(500).json({ error: error.message });
+    if (!amount || amount < 5) {
+      return res.status(400).json({ error: 'La donación mínima es de $5.00' });
     }
-});
 
-app.get('/', (req, res) => {
-    res.json({ status: 'Backend funcionando ✅' });
-});
+    const lineItems = [
+      {
+        price_data: {
+          currency: 'usd',
+          product_data: {
+            name: campaignName || 'Donación',
+            description: 'Tu generosidad hace la diferencia',
+          },
+          unit_amount: Math.round(amount * 100),
+        },
+        quantity: 1,
+      }
+    ];
 
-const PORT = process.env.PORT || 3000;
-app.listen(PORT, () => {
-    console.log(`Servidor en puerto ${PORT}`);
+    if (tip && tip > 0) {
+      lineItems.push({
+        price_data: {
+          currency: 'usd',
+          product_data: {
+            name: 'Aporte voluntario a GoFundMe',
+          },
+          unit_amount: Math.round(tip * 100),
+        },
+        quantity: 1,
+      });
+    }
+
+    const session = await stripe.checkout.sessions.create({
+      payment_method_types: ['card'],
+      line_items: lineItems,
+      mode: 'payment',
+      
+      // ✅ URLs CORREGIDAS
+      success_url: `https://gohelpyou.com/gracias`,
+      cancel_url: `https://gohelpyou.com/?canceled=true`,
+      
+      metadata: {
+        amount: amount.toString(),
+        tip: (tip || 0).toString(),
+        total: (total || amount).toString(),
+        campaignName: campaignName || 'Donación',
+      },
+      locale: 'es-419',
+    });
+
+    res.json({ 
+      url: session.url,
+      sessionId: session.id 
+    });
+
+  } catch (error) {
+    console.error('❌ Error:', error);
+    res.status(500).json({ error: error.message });
+  }
 });
