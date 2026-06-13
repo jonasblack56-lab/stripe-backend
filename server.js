@@ -48,7 +48,7 @@ app.get('/diagnose', (req, res) => {
 });
 
 // ============================================
-// 🎯 CREAR SESIÓN DE PAGO
+// 🎯 CREAR SESIÓN DE PAGO (CORREGIDO)
 // ============================================
 app.post('/create-checkout-session', async (req, res) => {
   console.log('📩 Nueva petición:', req.body);
@@ -77,20 +77,32 @@ app.post('/create-checkout-session', async (req, res) => {
       });
     }
 
-    // ✅ TÍTULO DE LA CAMPAÑA (se mostrará en Stripe)
-    const tituloCampana = campaignName || 'Donación a la campaña';
+    // ✅ TÍTULO DE LA CAMPAÑA
+    const tituloCampana = campaignName || 'Donación solidaria';
     
-    // ✅ DESCRIPCIÓN DETALLADA PARA STRIPE
-    const descripcionCampana = `Tu donación ayudará a cumplir el sueño de Cecilia y sus hijos. ¡Gracias por tu generosidad!`;
+    // ✅ CALCULAR TOTAL
+    const tipAmount = tip || 0;
+    const totalAmount = amount + tipAmount;
+    
+    // ✅ CREAR STATEMENT DESCRIPTOR PERSONALIZADO
+    // Esto reemplaza "LOZADANETWORK LLC" en el checkout de Stripe
+    // Máximo 22 caracteres, solo letras, números, espacios y algunos símbolos
+    const statementDescriptor = tituloCampana
+      .replace(/[^\w\s]/g, '')  // Eliminar caracteres especiales
+      .trim()
+      .substring(0, 18);  // Máximo 18 caracteres para dejar espacio al sufijo
+    
+    // ✅ DESCRIPCIÓN DETALLADA
+    const descripcionCampana = `Tu donación de $${amount.toFixed(2)} ayudará a cumplir el sueño de Cecilia y sus hijos. ¡Gracias por tu generosidad!`;
 
     // ✅ CONSTRUIR ITEMS PARA STRIPE
     const lineItems = [
-      // ITEM 1: Donación principal con el título de la campaña
+      // ITEM 1: Donación principal con título de la campaña
       {
         price_data: {
           currency: 'usd',
           product_data: {
-            name: `💚 ${tituloCampana}`,
+            name: tituloCampana,
             description: descripcionCampana,
             images: ['https://i.ibb.co/4Rrb1ZPR/IMG-5534115-2-1.jpg'],
           },
@@ -101,50 +113,90 @@ app.post('/create-checkout-session', async (req, res) => {
     ];
 
     // ITEM 2: Aporte voluntario (si existe)
-    if (tip && tip > 0) {
+    if (tipAmount > 0) {
       lineItems.push({
         price_data: {
           currency: 'usd',
           product_data: {
-            name: `🤝 Aporte voluntario a GoFundMe`,
-            description: `Gracias por apoyar la plataforma. Tu aporte voluntario nos permite seguir conectando campañas con donantes.`,
+            name: 'Aporte voluntario a GoFundMe',
+            description: `Gracias por apoyar la plataforma con $${tipAmount.toFixed(2)}.`,
           },
-          unit_amount: Math.round(tip * 100),
+          unit_amount: Math.round(tipAmount * 100),
         },
         quantity: 1,
       });
     }
 
-    console.log('🛒 Creando sesión con items:', lineItems);
+    console.log('🛒 Creando sesión con items:', {
+      titulo: tituloCampana,
+      amount: amount,
+      tip: tipAmount,
+      total: totalAmount
+    });
 
-    // ✅ CREAR SESIÓN DE STRIPE
+    // ✅ CREAR SESIÓN DE STRIPE CON STATEMENT DESCRIPTOR PERSONALIZADO
     const session = await stripe.checkout.sessions.create({
       payment_method_types: ['card'],
       line_items: lineItems,
       mode: 'payment',
       
+      // ✅ ESTO ES LO IMPORTANTE: Reemplaza "LOZADANETWORK LLC"
+      payment_intent_data: {
+        // Statement descriptor (aparece en el estado de cuenta de la tarjeta)
+        statement_descriptor: statementDescriptor.toUpperCase(),
+        
+        // Sufijo adicional (aparece después del nombre del negocio)
+        statement_descriptor_suffix: 'DONACION',
+        
+        // Descripción completa del pago
+        description: `${tituloCampana} - Total: $${totalAmount.toFixed(2)} USD`,
+        
+        // Metadata para tu referencia
+        metadata: {
+          campaignName: tituloCampana,
+          donationAmount: amount.toString(),
+          tipAmount: tipAmount.toString(),
+          totalAmount: totalAmount.toString(),
+        }
+      },
+      
       // URLs de redirección
       success_url: `https://gohelpyou.com/graciasportudonativo?session_id={CHECKOUT_SESSION_ID}&amount=${amount}`,
       cancel_url: `https://gohelpyou.com/?canceled=true`,
       
-      // Metadata
+      // Metadata de la sesión
       metadata: {
         amount: amount.toString(),
-        tip: (tip || 0).toString(),
+        tip: tipAmount.toString(),
+        total: totalAmount.toString(),
         campaignName: tituloCampana,
       },
       
       // Configuración adicional
       locale: 'es-419',
       billing_address_collection: 'auto',
+      
+      // ✅ Personalizar la página de checkout
+      custom_text: {
+        // Mensaje personalizado arriba del formulario de pago
+        submit_button: 'Pagar Donación',
+      },
+      
+      // Mostrar el total de forma prominente
+      payment_method_options: {
+        card: {
+          request_three_d_secure: 'automatic',
+        },
+      },
     });
 
     console.log('✅ Sesión creada:', {
       sessionId: session.id,
       amount: amount,
-      tip: tip,
-      total: total,
-      campaignName: tituloCampana
+      tip: tipAmount,
+      total: totalAmount,
+      campaignName: tituloCampana,
+      statementDescriptor: statementDescriptor
     });
 
     res.json({ 
@@ -185,6 +237,7 @@ app.get('/verify-payment', async (req, res) => {
       status: session.payment_status,
       amount: session.metadata.amount || (session.amount_total / 100).toString(),
       tip: session.metadata.tip || '0',
+      total: session.metadata.total || (session.amount_total / 100).toString(),
       sessionId: session.id,
       customerEmail: session.customer_details?.email || null,
       paid: session.payment_status === 'paid'
