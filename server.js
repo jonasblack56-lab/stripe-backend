@@ -6,20 +6,35 @@ const cors = require('cors');
 const app = express();
 const PORT = process.env.PORT || 3000;
 
-app.use(cors({ origin: '*', credentials: true }));
+// ============================================
+// 🌐 CORS CONFIGURACIÓN
+// ============================================
+app.use(cors({
+  origin: '*',
+  credentials: true
+}));
+
 app.post('/webhook', express.raw({ type: 'application/json' }));
 app.use(express.json());
 
+// ============================================
+// 🏠 RUTA DE PRUEBA
+// ============================================
 app.get('/', (req, res) => {
   res.json({ 
     status: 'ok',
     message: 'Backend funcionando',
-    backend_url: 'https://stripe-backend-e2ig.onrender.com'
+    backend_url: 'https://stripe-backend-e2ig.onrender.com',
+    timestamp: new Date().toISOString()
   });
 });
 
+// ============================================
+// 🧪 ENDPOINT DE DIAGNÓSTICO
+// ============================================
 app.get('/diagnose', (req, res) => {
   const apiKey = process.env.STRIPE_SECRET_KEY;
+  
   res.json({
     backend_status: 'ok',
     api_key_configured: !!apiKey,
@@ -27,16 +42,19 @@ app.get('/diagnose', (req, res) => {
     api_key_length: apiKey ? apiKey.length : 0,
     api_key_valid_format: apiKey ? apiKey.startsWith('sk_') : false,
     webhook_secret_configured: !!process.env.STRIPE_WEBHOOK_SECRET,
+    node_version: process.version,
+    timestamp: new Date().toISOString()
   });
 });
 
 // ============================================
-// 🎯 CREAR SESIÓN DE PAGO (CON APORTE VOLUNTARIO)
+// 🎯 CREAR SESIÓN DE PAGO (VERSIÓN FUSIONADA)
 // ============================================
 app.post('/create-checkout-session', async (req, res) => {
   console.log('📩 Nueva petición:', req.body);
   
   try {
+    // ✅ Validar API key
     const apiKey = process.env.STRIPE_SECRET_KEY;
     if (!apiKey) {
       return res.status(500).json({ error: 'STRIPE_SECRET_KEY no configurada' });
@@ -47,7 +65,7 @@ app.post('/create-checkout-session', async (req, res) => {
     }
 
     const { amount, tip, total, campaignName } = req.body;
-    
+
     if (!amount || isNaN(amount) || amount < 5) {
       return res.status(400).json({ error: 'Monto inválido. Mínimo $5.00' });
     }
@@ -56,14 +74,14 @@ app.post('/create-checkout-session', async (req, res) => {
     const tipAmount = tip || 0;
     const totalAmount = amount + tipAmount;
     
-    // ✅ Statement descriptor (aparece en el estado de cuenta bancario)
+    // ✅ Statement descriptor (aparece en estado de cuenta)
     const statementDescriptor = tituloCampana
       .replace(/[^\w\s]/g, '')
       .trim()
       .substring(0, 22)
       .toUpperCase();
 
-    // ✅ CONSTRUIR ITEMS PARA STRIPE
+    // ✅ CONSTRUIR ITEMS
     const lineItems = [
       {
         price_data: {
@@ -79,7 +97,7 @@ app.post('/create-checkout-session', async (req, res) => {
       }
     ];
 
-    // ✅ AGREGAR APORTE VOLUNTARIO COMO SEGUNDO ITEM
+    // ✅ Agregar aporte voluntario si existe
     if (tipAmount > 0) {
       lineItems.push({
         price_data: {
@@ -104,6 +122,7 @@ app.post('/create-checkout-session', async (req, res) => {
       line_items: lineItems,
       mode: 'payment',
       
+      // ✅ Statement descriptor personalizado
       payment_intent_data: {
         statement_descriptor: statementDescriptor,
         description: `${tituloCampana} - Total: $${totalAmount.toFixed(2)} USD`,
@@ -155,6 +174,9 @@ app.post('/create-checkout-session', async (req, res) => {
   }
 });
 
+// ============================================
+// 🔍 VERIFICAR PAGO
+// ============================================
 app.get('/verify-payment', async (req, res) => {
   const { session_id } = req.query;
   if (!session_id) return res.status(400).json({ error: 'Session ID requerido' });
@@ -174,6 +196,9 @@ app.get('/verify-payment', async (req, res) => {
   }
 });
 
+// ============================================
+// 🔔 WEBHOOK
+// ============================================
 app.post('/webhook', async (req, res) => {
   const sig = req.headers['stripe-signature'];
   const endpointSecret = process.env.STRIPE_WEBHOOK_SECRET;
@@ -182,18 +207,32 @@ app.post('/webhook', async (req, res) => {
   try {
     event = stripe.webhooks.constructEvent(req.body, sig, endpointSecret);
   } catch (err) {
+    console.error('❌ Webhook error:', err.message);
     return res.status(400).send(`Webhook Error: ${err.message}`);
   }
 
   if (event.type === 'checkout.session.completed') {
     const session = event.data.object;
-    console.log('✅ PAGO EXITOSO:', session.id);
+    console.log('✅ PAGO EXITOSO:', {
+      sessionId: session.id,
+      amount: session.amount_total / 100,
+      currency: session.currency,
+      metadata: session.metadata
+    });
   }
 
   res.json({ received: true });
 });
 
+// ============================================
+// 🚀 INICIAR SERVIDOR
+// ============================================
 app.listen(PORT, () => {
-  console.log(`🚀 Servidor corriendo en puerto ${PORT}`);
-  console.log(`🌐 URL: https://stripe-backend-e2ig.onrender.com`);
+  console.log(`
+  ╔══════════════════════════════════════════╗
+  ║  🚀 Servidor Stripe corriendo            ║
+  ║  📍 Puerto: ${PORT}                         ║
+  ║  🌐 URL: https://stripe-backend-e2ig.onrender.com
+  ╚══════════════════════════════════════════╝
+  `);
 });
