@@ -2,29 +2,19 @@ require('dotenv').config();
 const express = require('express');
 const stripe = require('stripe')(process.env.STRIPE_SECRET_KEY);
 const cors = require('cors');
-require('dotenv').config();
 
 const app = express();
 const PORT = process.env.PORT || 3000;
 
 // ============================================
-// 🌐 CONFIGURACIÓN DE CORS
+// 🌐 CORS CONFIGURACIÓN
 // ============================================
 app.use(cors({
-    origin: '*',
-  origin: [
-    'https://gohelpyou.com',
-    'http://localhost:3000',
-    'http://localhost:5500',
-    'https://stripe-backend-e2ig.onrender.com'
-  ],
+  origin: '*',
   credentials: true
 }));
 
-// Para webhooks (necesita raw body)
 app.post('/webhook', express.raw({ type: 'application/json' }));
-
-// Para otras rutas
 app.use(express.json());
 
 // ============================================
@@ -33,130 +23,180 @@ app.use(express.json());
 app.get('/', (req, res) => {
   res.json({ 
     status: 'ok',
-    message: 'Backend de Stripe funcionando correctamente',
-    endpoints: {
-      'POST /create-checkout-session': 'Crear sesión de pago',
-      'GET /verify-payment?session_id=xxx': 'Verificar pago',
-      'POST /webhook': 'Webhook de Stripe'
-    }
+    message: 'Backend funcionando',
+    backend_url: 'https://stripe-backend-e2ig.onrender.com',
+    timestamp: new Date().toISOString()
   });
 });
 
 // ============================================
-// 🎯 CREAR SESIÓN DE PAGO
+// 🧪 ENDPOINT DE DIAGNÓSTICO
+// ============================================
+app.get('/diagnose', (req, res) => {
+  const apiKey = process.env.STRIPE_SECRET_KEY;
+  
+  res.json({
+    backend_status: 'ok',
+    api_key_configured: !!apiKey,
+    api_key_prefix: apiKey ? apiKey.substring(0, 10) + '...' : 'NO CONFIGURADA',
+    api_key_length: apiKey ? apiKey.length : 0,
+    api_key_valid_format: apiKey ? apiKey.startsWith('sk_') : false,
+    webhook_secret_configured: !!process.env.STRIPE_WEBHOOK_SECRET,
+    node_version: process.version,
+    timestamp: new Date().toISOString()
+  });
+});
+
+// ============================================
+// 🎯 CREAR SESIÓN DE PAGO (CORREGIDO)
 // ============================================
 app.post('/create-checkout-session', async (req, res) => {
-    try {
-        const { amount, tip, total, campaignName } = req.body;
-
-        if (!amount || amount < 5) {
-            return res.status(400).json({ error: 'Monto inválido' });
-        }
-
-        const amountInCents = Math.round(total * 100);
-
-        const session = await stripe.checkout.sessions.create({
-            payment_method_types: ['card'],
-            line_items: [
-                {
-                    price_data: {
-                        currency: 'usd',
-                        product_data: {
-                            name: campaignName || 'Donación',
-                            description: `Donación $${amount} + Aporte $${tip}`,
-                        },
-                        unit_amount: amountInCents,
-                    },
-                    quantity: 1,
-                },
-            ],
-            mode: 'payment',
-            success_url: 'https://www.gohelpyou.com/gracias',
-            cancel_url: 'https://www.gohelpyou.com/pagocancelado',
-            metadata: {
-                donation_amount: amount.toString(),
-                tip_amount: tip.toString(),
-                total_amount: total.toString(),
-            },
-        });
-
-        res.json({ url: session.url, sessionId: session.id });
-
-    } catch (error) {
-        console.error('Error:', error);
-        res.status(500).json({ error: error.message });
+  console.log('📩 Nueva petición:', req.body);
+  
   try {
-    const { amount, tip, total, campaignName } = req.body;
-
-    // Validaciones
-    if (!amount || amount < 5) {
-      return res.status(400).json({ 
-        error: 'La donación mínima es de $5.00' 
+    // Validar clave API
+    const apiKey = process.env.STRIPE_SECRET_KEY;
+    if (!apiKey) {
+      return res.status(500).json({ 
+        error: 'STRIPE_SECRET_KEY no configurada en Render' 
       });
     }
 
-    // Construir items para Stripe
+    if (!apiKey.startsWith('sk_')) {
+      return res.status(500).json({ 
+        error: 'Formato de clave API inválido' 
+      });
+    }
+
+    // Validar datos
+    const { amount, tip, total, campaignName } = req.body;
+    
+    if (!amount || isNaN(amount) || amount < 5) {
+      return res.status(400).json({ 
+        error: 'Monto inválido. Mínimo $5.00' 
+      });
+    }
+
+    // ✅ TÍTULO DE LA CAMPAÑA
+    const tituloCampana = campaignName || 'Donación solidaria';
+    
+    // ✅ CALCULAR TOTAL
+    const tipAmount = tip || 0;
+    const totalAmount = amount + tipAmount;
+    
+    // ✅ CREAR STATEMENT DESCRIPTOR PERSONALIZADO
+    // Esto reemplaza "LOZADANETWORK LLC" en el checkout de Stripe
+    // Máximo 22 caracteres, solo letras, números, espacios y algunos símbolos
+    const statementDescriptor = tituloCampana
+      .replace(/[^\w\s]/g, '')  // Eliminar caracteres especiales
+      .trim()
+      .substring(0, 18);  // Máximo 18 caracteres para dejar espacio al sufijo
+    
+    // ✅ DESCRIPCIÓN DETALLADA
+    const descripcionCampana = `Tu donación de $${amount.toFixed(2)} ayudará a cumplir el sueño de Cecilia y sus hijos. ¡Gracias por tu generosidad!`;
+
+    // ✅ CONSTRUIR ITEMS PARA STRIPE
     const lineItems = [
+      // ITEM 1: Donación principal con título de la campaña
       {
         price_data: {
           currency: 'usd',
           product_data: {
-            name: campaignName || 'Donación',
-            description: 'Tu generosidad hace la diferencia',
+            name: tituloCampana,
+            description: descripcionCampana,
+            images: ['https://i.ibb.co/4Rrb1ZPR/IMG-5534115-2-1.jpg'],
           },
-          unit_amount: Math.round(amount * 100), // Convertir a centavos
+          unit_amount: Math.round(amount * 100),
         },
         quantity: 1,
       }
     ];
 
-    // Agregar propina si existe
-    if (tip && tip > 0) {
+    // ITEM 2: Aporte voluntario (si existe)
+    if (tipAmount > 0) {
       lineItems.push({
         price_data: {
           currency: 'usd',
           product_data: {
             name: 'Aporte voluntario a GoFundMe',
-            description: 'Gracias por apoyar la plataforma',
+            description: `Gracias por apoyar la plataforma con $${tipAmount.toFixed(2)}.`,
           },
-          unit_amount: Math.round(tip * 100),
+          unit_amount: Math.round(tipAmount * 100),
         },
         quantity: 1,
       });
     }
 
-    // ✅ CREAR SESIÓN CON URLs CORRECTAS
+    console.log('🛒 Creando sesión con items:', {
+      titulo: tituloCampana,
+      amount: amount,
+      tip: tipAmount,
+      total: totalAmount
+    });
+
+    // ✅ CREAR SESIÓN DE STRIPE CON STATEMENT DESCRIPTOR PERSONALIZADO
     const session = await stripe.checkout.sessions.create({
       payment_method_types: ['card'],
       line_items: lineItems,
       mode: 'payment',
       
-      // ✅ URL DE ÉXITO - Redirige a página de agradecimiento
-      success_url: `https://gohelpyou.com/gracias?session_id={CHECKOUT_SESSION_ID}&amount=${amount}`,
+      // ✅ ESTO ES LO IMPORTANTE: Reemplaza "LOZADANETWORK LLC"
+      payment_intent_data: {
+        // Statement descriptor (aparece en el estado de cuenta de la tarjeta)
+        statement_descriptor: statementDescriptor.toUpperCase(),
+        
+        // Sufijo adicional (aparece después del nombre del negocio)
+        statement_descriptor_suffix: 'DONACION',
+        
+        // Descripción completa del pago
+        description: `${tituloCampana} - Total: $${totalAmount.toFixed(2)} USD`,
+        
+        // Metadata para tu referencia
+        metadata: {
+          campaignName: tituloCampana,
+          donationAmount: amount.toString(),
+          tipAmount: tipAmount.toString(),
+          totalAmount: totalAmount.toString(),
+        }
+      },
       
-      // ✅ URL DE CANCELACIÓN - Redirige al widget con mensaje
+      // URLs de redirección
+      success_url: `https://gohelpyou.com/graciasportudonativo?session_id={CHECKOUT_SESSION_ID}&amount=${amount}`,
       cancel_url: `https://gohelpyou.com/?canceled=true`,
       
-      // Metadata para guardar información adicional
+      // Metadata de la sesión
       metadata: {
         amount: amount.toString(),
-        tip: (tip || 0).toString(),
-        total: (total || amount).toString(),
-        campaignName: campaignName || 'Donación',
-        createdAt: new Date().toISOString()
+        tip: tipAmount.toString(),
+        total: totalAmount.toString(),
+        campaignName: tituloCampana,
       },
       
       // Configuración adicional
-      allow_promotion_codes: true,
+      locale: 'es-419',
       billing_address_collection: 'auto',
-      locale: 'es-419', // Español latinoamericano
+      
+      // ✅ Personalizar la página de checkout
+      custom_text: {
+        // Mensaje personalizado arriba del formulario de pago
+        submit_button: 'Pagar Donación',
+      },
+      
+      // Mostrar el total de forma prominente
+      payment_method_options: {
+        card: {
+          request_three_d_secure: 'automatic',
+        },
+      },
     });
 
     console.log('✅ Sesión creada:', {
       sessionId: session.id,
       amount: amount,
-      tip: tip,
-      total: total
+      tip: tipAmount,
+      total: totalAmount,
+      campaignName: tituloCampana,
+      statementDescriptor: statementDescriptor
     });
 
     res.json({ 
@@ -165,17 +205,23 @@ app.post('/create-checkout-session', async (req, res) => {
     });
 
   } catch (error) {
-    console.error('❌ Error creando sesión:', error);
+    console.error('❌ ERROR COMPLETO:', {
+      type: error.type,
+      message: error.message,
+      code: error.code,
+      rawType: error.rawType
+    });
+    
     res.status(500).json({ 
-      error: error.message || 'Error al crear la sesión de pago' 
+      error: error.message,
+      type: error.type,
+      code: error.code
     });
   }
 });
 
-app.get('/', (req, res) => {
-    res.json({ status: 'Backend funcionando ✅' });
 // ============================================
-// 🔍 VERIFICAR ESTADO DEL PAGO
+// 🔍 VERIFICAR PAGO
 // ============================================
 app.get('/verify-payment', async (req, res) => {
   const { session_id } = req.query;
@@ -185,17 +231,10 @@ app.get('/verify-payment', async (req, res) => {
   }
 
   try {
-    // Consultar el estado de la sesión en Stripe
     const session = await stripe.checkout.sessions.retrieve(session_id);
 
-    console.log('🔍 Verificando pago:', {
-      sessionId: session.id,
-      status: session.payment_status,
-      amount: session.amount_total
-    });
-
     res.json({
-      status: session.payment_status, // 'paid', 'unpaid', 'no_payment_required'
+      status: session.payment_status,
       amount: session.metadata.amount || (session.amount_total / 100).toString(),
       tip: session.metadata.tip || '0',
       total: session.metadata.total || (session.amount_total / 100).toString(),
@@ -205,16 +244,13 @@ app.get('/verify-payment', async (req, res) => {
     });
 
   } catch (error) {
-    console.error('❌ Error verificando pago:', error);
-    res.status(500).json({ 
-      error: error.message || 'Error al verificar el pago' 
-    });
+    console.error('❌ Error verificando:', error.message);
+    res.status(500).json({ error: error.message });
   }
 });
 
-const PORT = process.env.PORT || 3000;
 // ============================================
-// 🔔 WEBHOOK - Escuchar eventos de Stripe
+// 🔔 WEBHOOK
 // ============================================
 app.post('/webhook', async (req, res) => {
   const sig = req.headers['stripe-signature'];
@@ -223,44 +259,21 @@ app.post('/webhook', async (req, res) => {
   let event;
 
   try {
-    // Verificar firma del webhook
     event = stripe.webhooks.constructEvent(req.body, sig, endpointSecret);
   } catch (err) {
-    console.error('❌ Error en webhook:', err.message);
+    console.error('❌ Webhook error:', err.message);
     return res.status(400).send(`Webhook Error: ${err.message}`);
   }
 
-  // Manejar diferentes tipos de eventos
-  switch (event.type) {
-    case 'checkout.session.completed':
-      const session = event.data.object;
-      
-      console.log('✅ PAGO EXITOSO:', {
-        sessionId: session.id,
-        amount: session.amount_total / 100,
-        currency: session.currency,
-        customerEmail: session.customer_details?.email,
-        metadata: session.metadata
-      });
-
-      // AQUÍ puedes:
-      // - Guardar en base de datos
-      // - Enviar email de confirmación
-      // - Actualizar contadores de la campaña
-      // - Notificar al administrador
-      
-      break;
-
-    case 'checkout.session.expired':
-      console.log('⚠️ Sesión expirada:', event.data.object.id);
-      break;
-
-    case 'payment_intent.payment_failed':
-      console.log('❌ Pago fallido:', event.data.object.id);
-      break;
-
-    default:
-      console.log(`ℹ️ Evento no manejado: ${event.type}`);
+  if (event.type === 'checkout.session.completed') {
+    const session = event.data.object;
+    console.log('✅ PAGO EXITOSO:', {
+      sessionId: session.id,
+      amount: session.amount_total / 100,
+      currency: session.currency,
+      customerEmail: session.customer_details?.email,
+      metadata: session.metadata
+    });
   }
 
   res.json({ received: true });
@@ -270,7 +283,6 @@ app.post('/webhook', async (req, res) => {
 // 🚀 INICIAR SERVIDOR
 // ============================================
 app.listen(PORT, () => {
-    console.log(`Servidor en puerto ${PORT}`);
   console.log(`
   ╔══════════════════════════════════════════╗
   ║  🚀 Servidor Stripe corriendo            ║
@@ -278,3 +290,4 @@ app.listen(PORT, () => {
   ║  🌐 URL: https://stripe-backend-e2ig.onrender.com
   ╚══════════════════════════════════════════╝
   `);
+});
